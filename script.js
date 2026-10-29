@@ -1,9 +1,9 @@
 // ==================== DATABASE LOCALSTORAGE ====================
 let db = JSON.parse(localStorage.getItem('aquaTrackDB')) || {
     members: [
-        { id: '1', name: 'Abdul Kadir Malik Salampessy', squad: 'Prestasi', gender: 'PA', wa: '628123456789' },
-        { id: '2', name: 'Fitrah Fadillah Subagyo', squad: 'Reguler', gender: 'PA', wa: '628987654321' },
-        { id: '3', name: 'Chloe Dafina Putri', squad: 'Pemula', gender: 'PI', wa: '628112233445' }
+        { id: '1', name: 'Abdul Kadir Malik Salampessy', squad: 'Prestasi', gender: 'PA', wa: '628123456789', birthDate: '2010-03-25' },
+        { id: '2', name: 'Fitrah Fadillah Subagyo', squad: 'Reguler', gender: 'PA', wa: '628987654321', birthDate: '2011-09-06' },
+        { id: '3', name: 'Chloe Dafina Putri', squad: 'Pemula', gender: 'PI', wa: '628112233445', birthDate: '2013-03-27' }
     ],
     spp: {}, 
     announcements: [
@@ -11,6 +11,14 @@ let db = JSON.parse(localStorage.getItem('aquaTrackDB')) || {
     ],
     attendance: {}, 
     performance: {},
+    workouts: [],
+    treasury: [
+        { id: 't1', date: new Date().toISOString().split('T')[0], type: 'masuk', amount: 500000, desc: 'Kas Awal Klub' }
+    ],
+    inventory: [
+        { id: 'i1', name: 'Kickboard / Pelampung', qty: 15, condition: 'Baik' },
+        { id: 'i2', name: 'Stopwatch Digital', qty: 4, condition: 'Baik' }
+    ],
     tournaments: {
         info: {
             club: "MARABUNTA SWIMMING CLUB",
@@ -22,19 +30,23 @@ let db = JSON.parse(localStorage.getItem('aquaTrackDB')) || {
     }
 };
 
-// Guard clause untuk menjamin struktur DB
+// Guarantee DB Structure Integrity
 if (!db.attendance) db.attendance = {};
 if (!db.performance) db.performance = {};
+if (!db.workouts) db.workouts = [];
+if (!db.treasury) db.treasury = [];
+if (!db.inventory) db.inventory = [];
 if (!db.tournaments) db.tournaments = { info: {}, registrations: {} };
 
 let currentRole = localStorage.getItem('aquaTrackRole') || 'parent';
 let currentPage = 'dashboard';
+let pbChartInstance = null;
 
 function saveData() {
     localStorage.setItem('aquaTrackDB', JSON.stringify(db));
 }
 
-// ==================== INISIALISASI APLIKASI ====================
+// ==================== INITIALIZATION ====================
 window.onload = () => {
     updateAuthUI();
     navigate('dashboard');
@@ -49,6 +61,12 @@ function updateAuthUI() {
         roleDisplay.innerHTML = '<i class="fa-solid fa-unlock text-green-600 mr-1"></i> Pelatih (Admin)';
         roleDisplay.parentElement.className = 'bg-blue-100 text-blue-800 px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2';
         authSection.innerHTML = `
+            <button onclick="backupData()" class="w-full flex justify-center items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
+                <i class="fa-solid fa-download"></i> Backup Data
+            </button>
+            <button onclick="triggerRestore()" class="w-full flex justify-center items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
+                <i class="fa-solid fa-upload"></i> Restore Data
+            </button>
             <button onclick="handleLogout()" class="w-full flex justify-center items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg transition-colors border border-slate-600 text-sm font-semibold">
                 <i class="fa-solid fa-right-from-bracket"></i> Logout
             </button>`;
@@ -93,6 +111,41 @@ function handleLogout() {
     navigate(currentPage);
 }
 
+// ==================== BACKUP & RESTORE DATA ====================
+function backupData() {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db, null, 2));
+    const dlAnchor = document.createElement('a');
+    dlAnchor.setAttribute("href", dataStr);
+    dlAnchor.setAttribute("download", `AquaTrack_Backup_${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(dlAnchor);
+    dlAnchor.click();
+    dlAnchor.remove();
+}
+
+function triggerRestore() {
+    document.getElementById('restore-file-input').click();
+}
+
+function processRestore(event) {
+    const fileReader = new FileReader();
+    fileReader.onload = function (e) {
+        try {
+            const restoredDB = JSON.parse(e.target.result);
+            if (restoredDB.members) {
+                db = restoredDB;
+                saveData();
+                alert('Data berhasil dipulihkan!');
+                location.reload();
+            } else {
+                alert('Format file JSON tidak sesuai.');
+            }
+        } catch (err) {
+            alert('Gagal membaca file JSON.');
+        }
+    };
+    fileReader.readAsText(event.target.files[0]);
+}
+
 // ==================== ROUTER NAVIGASI ====================
 function navigate(page) {
     currentPage = page;
@@ -109,7 +162,9 @@ function navigate(page) {
         case 'members': renderMembers(); break;
         case 'attendance': renderAttendance(); break;
         case 'performance': renderPerformance(); break;
+        case 'workout': renderWorkout(); break;
         case 'billing': renderBilling(); break;
+        case 'inventory': renderInventory(); break;
         case 'tournament': renderTournament(); break;
     }
 }
@@ -119,8 +174,18 @@ function renderDashboard() {
     document.getElementById('page-title').innerText = "Dashboard Utama";
     const totalMembers = db.members.length;
     const isCoach = currentRole === 'coach';
-    
+
+    // Cek Ulang Tahun Atlet Bulan/Hari Ini
+    const today = new Date();
+    const currentMonth = String(today.getMonth() + 1).padStart(2, '0');
+    const birthdayAthletes = db.members.filter(m => {
+        if (!m.birthDate) return false;
+        const parts = m.birthDate.split('-');
+        return parts[1] === currentMonth;
+    });
+
     let html = `
+        <!-- Ringkasan Statistik -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between border-l-4 border-l-primary">
                 <div>
@@ -145,7 +210,18 @@ function renderDashboard() {
             </div>
         </div>
 
-        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <!-- Ulang Tahun Alert -->
+        ${birthdayAthletes.length > 0 ? `
+        <div class="bg-gradient-to-r from-pink-500 to-rose-500 text-white p-4 rounded-xl shadow-sm mb-8 flex items-center gap-4">
+            <i class="fa-solid fa-cake-candles text-3xl"></i>
+            <div>
+                <h4 class="font-bold text-sm">Ulang Tahun Bulan Ini! 🎂</h4>
+                <p class="text-xs opacity-90">Selamat kepada: ${birthdayAthletes.map(a => `<b>${a.name}</b> (${a.squad})`).join(', ')}</p>
+            </div>
+        </div>` : ''}
+
+        <!-- Papan Pengumuman -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-8">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-bold text-slate-800"><i class="fa-solid fa-bullhorn text-yellow-500 mr-2"></i> Papan Pengumuman</h3>
                 ${isCoach ? `<button onclick="addAnnouncement()" class="bg-primary text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-600 transition">+ Tambah</button>` : ''}
@@ -158,6 +234,77 @@ function renderDashboard() {
                     </li>
                 `).join('')}
             </ul>
+        </div>
+
+        <!-- Segitiga Emas Renang -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-8 border-t-4 border-t-primary">
+            <div class="flex items-center gap-3 mb-4 border-b border-slate-100 pb-3">
+                <div class="bg-blue-100 text-primary p-2.5 rounded-lg"><i class="fa-solid fa-people-group text-xl"></i></div>
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800">Segitiga Emas Olahraga: Sinergi Atlet, Pelatih & Wali Atlet</h3>
+                    <p class="text-xs text-slate-500">Kunci sukses perkembangan prestasi anak tidak lepas dari hubungan harmonis tiga pilar ini.</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+                <div class="bg-blue-50/60 p-4 rounded-xl border border-blue-100">
+                    <h4 class="font-bold text-blue-800 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-person-swimming text-primary"></i> 1. Atlet (Pusat)
+                    </h4>
+                    <p class="text-slate-600 text-xs leading-relaxed">Fokus pada kedisiplinan, semangat belajar, dan membangun mental pantang menyerah saat latihan maupun bertanding.</p>
+                </div>
+                <div class="bg-teal-50/60 p-4 rounded-xl border border-teal-100">
+                    <h4 class="font-bold text-teal-800 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-user-tie text-secondary"></i> 2. Pelatih (Teknis)
+                    </h4>
+                    <p class="text-slate-600 text-xs leading-relaxed">Menyusun program terstruktur, mengevaluasi rekor PB, serta memberikan bimbingan fisik dan mental secara profesional.</p>
+                </div>
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-heart-pulse text-red-500"></i> 3. Wali Atlet (Support)
+                    </h4>
+                    <p class="text-slate-600 text-xs leading-relaxed">Memberikan dukungan moral tanpa tekanan, memastikan nutrisi & istirahat, serta mempercayakan proses teknis kepada pelatih.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Konsep LTAD -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 border-t-4 border-t-secondary">
+            <div class="flex items-center gap-3 mb-4 border-b border-slate-100 pb-3">
+                <div class="bg-teal-100 text-secondary p-2.5 rounded-lg"><i class="fa-solid fa-chart-line text-xl"></i></div>
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800">Panduan Pembinaan LTAD (Long-Term Athlete Development)</h3>
+                    <p class="text-xs text-slate-500">Pendekatan pembinaan atlet berjenjang berbasis usia biologis dan tumbuh kembang anak.</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div class="p-3 rounded-lg border border-slate-200 bg-slate-50">
+                    <span class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold text-[10px]">Tahap 1</span>
+                    <h5 class="font-bold text-slate-800 mt-2 mb-1">FUNdamentals</h5>
+                    <p class="text-slate-500 text-[11px]">Mengembangkan koordinasi gerak dasar di air melalui permainan yang menyenangkan.</p>
+                </div>
+                <div class="p-3 rounded-lg border border-blue-100 bg-blue-50/50">
+                    <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold text-[10px]">Tahap 2 (Pemula)</span>
+                    <h5 class="font-bold text-blue-900 mt-2 mb-1">Learning to Train</h5>
+                    <p class="text-slate-500 text-[11px]">Penguasaan 4 gaya renang dengan teknik yang benar dan efisien.</p>
+                </div>
+                <div class="p-3 rounded-lg border border-teal-100 bg-teal-50/50">
+                    <span class="bg-teal-100 text-teal-700 px-2 py-0.5 rounded font-bold text-[10px]">Tahap 3 (Reguler)</span>
+                    <h5 class="font-bold text-teal-900 mt-2 mb-1">Training to Train</h5>
+                    <p class="text-slate-500 text-[11px]">Peningkatan kapasitas fisik, daya tahan, dan pengenalan strategi perlombaan.</p>
+                </div>
+                <div class="p-3 rounded-lg border border-indigo-100 bg-indigo-50/50">
+                    <span class="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold text-[10px]">Tahap 4 (Prestasi)</span>
+                    <h5 class="font-bold text-indigo-900 mt-2 mb-1">Training to Compete</h5>
+                    <p class="text-slate-500 text-[11px]">Spesialisasi jarak & gaya renang utama, serta pemantapan mental bertanding.</p>
+                </div>
+                <div class="p-3 rounded-lg border border-yellow-200 bg-yellow-50/50">
+                    <span class="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded font-bold text-[10px]">Tahap 5</span>
+                    <h5 class="font-bold text-yellow-900 mt-2 mb-1">Training to Win</h5>
+                    <p class="text-slate-500 text-[11px]">Mencapai performa puncak (peak performance) pada kejuaraan resmi.</p>
+                </div>
+            </div>
         </div>
     `;
     document.getElementById('content-area').innerHTML = html;
@@ -184,7 +331,7 @@ function renderMembers() {
         html += `
         <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6">
             <h3 class="text-md font-bold mb-4 text-slate-800">Tambah Anggota Baru</h3>
-            <form onsubmit="addMember(event)" class="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <form onsubmit="addMember(event)" class="grid grid-cols-1 md:grid-cols-6 gap-4">
                 <input type="text" id="m-name" placeholder="Nama Atlet" class="border border-slate-200 p-2 rounded-lg text-sm outline-none focus:border-primary" required>
                 <select id="m-squad" class="border border-slate-200 p-2 rounded-lg text-sm outline-none focus:border-primary" required>
                     <option value="">Pilih Squad...</option>
@@ -196,7 +343,8 @@ function renderMembers() {
                     <option value="PA">PA (Putra)</option>
                     <option value="PI">PI (Putri)</option>
                 </select>
-                <input type="text" id="m-wa" placeholder="No WA Wali (Cth: 0812...)" class="border border-slate-200 p-2 rounded-lg text-sm outline-none focus:border-primary" required>
+                <input type="date" id="m-birth" title="Tanggal Lahir" class="border border-slate-200 p-2 rounded-lg text-sm outline-none focus:border-primary" required>
+                <input type="text" id="m-wa" placeholder="No WA Wali (0812...)" class="border border-slate-200 p-2 rounded-lg text-sm outline-none focus:border-primary" required>
                 <button type="submit" class="bg-primary text-white font-semibold py-2 rounded-lg hover:bg-blue-600 transition text-sm">Simpan</button>
             </form>
         </div>`;
@@ -237,8 +385,9 @@ function generateMembersTable(keyword = '') {
                     <th class="p-4">Nama Atlet</th>
                     <th class="p-4">PA/PI</th>
                     <th class="p-4">Squad</th>
+                    <th class="p-4">Tgl Lahir</th>
                     <th class="p-4">No. WA Wali</th>
-                    ${isCoach ? `<th class="p-4">Aksi</th>` : ''}
+                    <th class="p-4">Aksi</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 text-sm">
@@ -249,11 +398,16 @@ function generateMembersTable(keyword = '') {
                         <td class="p-4 font-medium text-slate-800">${m.name}</td>
                         <td class="p-4"><span class="px-2 py-0.5 rounded text-xs font-bold ${m.gender === 'PI' ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'}">${m.gender || 'PA'}</span></td>
                         <td class="p-4"><span class="bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full text-xs font-semibold">${m.squad}</span></td>
+                        <td class="p-4 text-slate-600 text-xs">${m.birthDate || '-'}</td>
                         <td class="p-4 text-slate-600"><i class="fa-brands fa-whatsapp text-green-500 mr-1"></i> ${m.wa}</td>
-                        ${isCoach ? `
-                        <td class="p-4">
+                        <td class="p-4 flex gap-2">
+                            <button onclick="printAthleteReport('${m.id}')" class="bg-teal-600 text-white px-2.5 py-1 rounded text-xs font-semibold hover:bg-teal-700 flex items-center gap-1">
+                                <i class="fa-solid fa-print"></i> Raport
+                            </button>
+                            ${isCoach ? `
                             <button onclick="deleteMember(${originalIndex})" class="text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button>
-                        </td>` : ''}
+                            ` : ''}
+                        </td>
                     </tr>
                     `;
                 }).join('')}
@@ -267,10 +421,11 @@ function addMember(e) {
     const name = document.getElementById('m-name').value;
     const squad = document.getElementById('m-squad').value;
     const gender = document.getElementById('m-gender').value;
+    const birthDate = document.getElementById('m-birth').value;
     let wa = document.getElementById('m-wa').value;
     if(wa.startsWith('0')) wa = '62' + wa.substring(1);
 
-    db.members.push({ id: Date.now().toString(), name, squad, gender, wa });
+    db.members.push({ id: Date.now().toString(), name, squad, gender, birthDate, wa });
     saveData();
     renderMembers();
 }
@@ -281,6 +436,89 @@ function deleteMember(index) {
         saveData();
         renderMembers();
     }
+}
+
+// ==================== RAPORT ATLET PRINT ====================
+function printAthleteReport(memberId) {
+    const member = db.members.find(m => m.id === memberId);
+    if (!member) return;
+
+    const records = db.performance[memberId] || [];
+    const today = new Date().toISOString().split('T')[0];
+
+    // Hitung kehadiran
+    let totalSesi = 0;
+    let hadir = 0;
+    Object.keys(db.attendance).forEach(dateStr => {
+        if (db.attendance[dateStr][memberId]) {
+            totalSesi++;
+            if (db.attendance[dateStr][memberId] === 'Hadir') hadir++;
+        }
+    });
+    const attendancePct = totalSesi > 0 ? Math.round((hadir / totalSesi) * 100) : 100;
+
+    const reportWindow = window.open('', '_blank');
+    reportWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Raport Atlet - ${member.name}</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="p-8 bg-white text-slate-800 font-sans">
+            <div class="border-b-2 border-slate-800 pb-4 mb-6 flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-900">MARABUNTA SWIMMING CLUB</h1>
+                    <p class="text-sm text-slate-600">Laporan Perkembangan & Evaluasi Atlet Renang</p>
+                </div>
+                <div class="text-right text-xs text-slate-500">Tanggal Cetak: ${today}</div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 text-sm mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div><b>Nama Atlet:</b> ${member.name}</div>
+                <div><b>Kelas / Squad:</b> ${member.squad}</div>
+                <div><b>Gender:</b> ${member.gender === 'PI' ? 'Putri' : 'Putra'}</div>
+                <div><b>Kehadiran Latihan:</b> ${attendancePct}% (${hadir}/${totalSesi} Sesi)</div>
+            </div>
+
+            <h3 class="font-bold text-md mb-2 border-b pb-1">Catatan Rekor Personal Best (PB):</h3>
+            <table class="w-full text-left border-collapse text-sm mb-6">
+                <thead>
+                    <tr class="bg-slate-100 text-xs uppercase border-b">
+                        <th class="p-2 border">Gaya Renang</th>
+                        <th class="p-2 border">Jarak</th>
+                        <th class="p-2 border">Waktu Tercepat</th>
+                        <th class="p-2 border">Tanggal Catat</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${records.length === 0 ? '<tr><td colspan="4" class="p-2 text-center text-slate-400">Belum ada rekor waktu.</td></tr>' : 
+                    records.map(r => `
+                        <tr>
+                            <td class="p-2 border">${r.gaya}</td>
+                            <td class="p-2 border">${r.jarak}</td>
+                            <td class="p-2 border font-bold text-blue-600">${r.waktu}</td>
+                            <td class="p-2 border text-xs text-slate-500">${r.tanggal}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+
+            <div class="border border-slate-200 p-4 rounded-lg mb-8">
+                <h4 class="font-bold text-xs uppercase text-slate-500 mb-2">Evaluasi & Catatan Pelatih:</h4>
+                <p class="text-sm italic text-slate-600">"Tetap tingkatkan konsistensi kehadiran dan perhatikan ketahanan stamina di 15 meter terakhir."</p>
+            </div>
+
+            <div class="flex justify-between items-end text-center text-sm mt-12">
+                <div><p>Orang Tua / Wali Atlet</p><br><br><br><p class="font-bold">( .................................... )</p></div>
+                <div><p>Head Coach / Pelatih</p><br><br><br><p class="font-bold">( Yuni Sri Wulandari )</p></div>
+            </div>
+
+            <script>window.print();</script>
+        </body>
+        </html>
+    `);
+    reportWindow.document.close();
 }
 
 // ==================== 3. ABSENSI LATIHAN ====================
@@ -401,13 +639,11 @@ function updateAttendance(dateStr, memberId, status) {
     saveData();
 }
 
-// ==================== 4. REKOR WAKTU (PERSONAL BEST / PB) ====================
-
+// ==================== 4. REKOR WAKTU & GRAFIK (PB) ====================
 function renderPerformance() {
     document.getElementById('page-title').innerText = "Rekor Waktu (Personal Best)";
     
     let html = `
-        <!-- Filter Kelas & Search Bar Atlet -->
         <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-col md:flex-row gap-4 items-center justify-between">
             <div class="w-full md:w-1/3">
                 <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Pilih Kelas / Squad</label>
@@ -428,27 +664,23 @@ function renderPerformance() {
             </div>
         </div>
 
-        <!-- Tabel Daftar Atlet di Kelas yang Dipilih -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-6" id="pb-athletes-table-container">
             ${generatePBAthletesTable('All', '')}
         </div>
 
-        <!-- Area Detail & Form Input PB Atlet yang Dipilih -->
         <div id="pb-detail-area"></div>
     `;
     document.getElementById('content-area').innerHTML = html;
 }
 
-// Dipanggil saat Filter Kelas atau Search Bar diubah
 function filterPerformancePage() {
     const squadFilter = document.getElementById('pb-squad-filter').value;
     const searchKeyword = document.getElementById('pb-search-athlete').value.toLowerCase();
     
     document.getElementById('pb-athletes-table-container').innerHTML = generatePBAthletesTable(squadFilter, searchKeyword);
-    document.getElementById('pb-detail-area').innerHTML = ''; // Reset detail saat filter berubah
+    document.getElementById('pb-detail-area').innerHTML = '';
 }
 
-// Generate Tabel Ringkasan Atlet
 function generatePBAthletesTable(squadFilter = 'All', keyword = '') {
     let filteredMembers = db.members;
 
@@ -497,7 +729,7 @@ function generatePBAthletesTable(squadFilter = 'All', keyword = '') {
                         <td class="p-4 font-mono font-bold ${bebas50 ? 'text-primary' : 'text-slate-400'}">${best50Text}</td>
                         <td class="p-4">
                             <button onclick="selectPBAthlete('${m.id}')" class="bg-primary hover:bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition shadow-sm flex items-center gap-1">
-                                <i class="fa-solid fa-stopwatch"></i> Lihat / Catat PB
+                                <i class="fa-solid fa-stopwatch"></i> lihat / Catat PB
                             </button>
                         </td>
                     </tr>
@@ -508,7 +740,6 @@ function generatePBAthletesTable(squadFilter = 'All', keyword = '') {
     `;
 }
 
-// Dipanggil saat tombol "Lihat / Catat PB" diklik
 function selectPBAthlete(memberId) {
     const member = db.members.find(m => m.id === memberId);
     if (!member) return;
@@ -546,6 +777,14 @@ function selectPBAthlete(memberId) {
         </div>` : '';
 
     detailArea.innerHTML = formHtml + `
+        <!-- Chart Canvas -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6 fade-in">
+            <h3 class="text-sm font-bold text-slate-800 mb-4"><i class="fa-solid fa-chart-line text-primary mr-2"></i>Grafik Perkembangan Rekor Waktu</h3>
+            <div class="h-64">
+                <canvas id="pbChart"></canvas>
+            </div>
+        </div>
+
         <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden fade-in">
             <div class="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
                 <h3 class="text-sm font-bold text-slate-800">Detail Personal Best: ${member.name}</h3>
@@ -562,7 +801,7 @@ function selectPBAthlete(memberId) {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-sm">
-                    ${records.length === 0 ? `<tr><td colspan="5" class="p-4 text-center text-slate-400">Belum ada catatan rekor waktu untuk atlet ini.</td></tr>` : 
+                    ${records.length === 0 ? `<tr><td colspan="5" class="p-4 text-center text-slate-400">Belum ada catatan rekor waktu.</td></tr>` : 
                     records.map((r, idx) => `
                         <tr class="hover:bg-slate-50">
                             <td class="p-4 font-medium text-slate-800">${r.gaya}</td>
@@ -577,11 +816,40 @@ function selectPBAthlete(memberId) {
         </div>
     `;
 
-    // Scroll halus ke area detail
+    renderPBChart(records);
     detailArea.scrollIntoView({ behavior: 'smooth' });
 }
 
-// Helper konversi format waktu "MM:SS.ms" atau "SS.ms" menjadi detik (float)
+function renderPBChart(records) {
+    const ctx = document.getElementById('pbChart').getContext('2d');
+    if (pbChartInstance) pbChartInstance.destroy();
+
+    const labels = records.map(r => `${r.gaya} (${r.jarak})`);
+    const dataSeconds = records.map(r => parseTimeToSeconds(r.waktu));
+
+    pbChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Waktu Tercepat (Detik)',
+                data: dataSeconds,
+                backgroundColor: 'rgba(14, 165, 233, 0.6)',
+                borderColor: '#0ea5e9',
+                borderWidth: 2,
+                borderRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: 'Detik' } }
+            }
+        }
+    });
+}
+
 function parseTimeToSeconds(timeStr) {
     if (!timeStr) return Infinity;
     const parts = timeStr.trim().split(':');
@@ -593,7 +861,6 @@ function parseTimeToSeconds(timeStr) {
     return Infinity;
 }
 
-// Logika Simpan & Auto-Update Record PB
 function addPB(e, memberId) {
     e.preventDefault();
     const gaya = document.getElementById('pb-gaya').value;
@@ -632,7 +899,6 @@ function addPB(e, memberId) {
         alert(`✅ Rekor awal untuk ${gaya} ${jarak} berhasil disimpan (${waktuInput}).`);
     }
 
-    // Refresh tabel & detail
     const squadFilter = document.getElementById('pb-squad-filter').value;
     const searchKeyword = document.getElementById('pb-search-athlete').value.toLowerCase();
     document.getElementById('pb-athletes-table-container').innerHTML = generatePBAthletesTable(squadFilter, searchKeyword);
@@ -651,7 +917,82 @@ function deletePB(memberId, index) {
     }
 }
 
-// ==================== 5. SPP & KEUANGAN ====================
+// ==================== 5. MENU LATIHAN (WORKOUT PLANNER) ====================
+function renderWorkout() {
+    document.getElementById('page-title').innerText = "Menu Latihan Harian";
+    const isCoach = currentRole === 'coach';
+
+    let html = `
+        ${isCoach ? `
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6">
+            <h3 class="text-md font-bold text-slate-800 mb-4">Buat Menu Latihan Baru</h3>
+            <form onsubmit="addWorkout(event)" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <input type="date" id="w-date" value="${new Date().toISOString().split('T')[0]}" class="border p-2 rounded-lg text-sm" required>
+                    <select id="w-squad" class="border p-2 rounded-lg text-sm" required>
+                        <option value="Semua Squad">Semua Squad</option>
+                        <option value="Pemula">Kelas Pemula</option>
+                        <option value="Reguler">Kelas Reguler</option>
+                        <option value="Prestasi">Kelas Prestasi</option>
+                    </select>
+                    <input type="text" id="w-title" placeholder="Judul Menu (Cth: Speed & Endurance)" class="border p-2 rounded-lg text-sm" required>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <textarea id="w-warm" placeholder="Warm-up (Cth: 400m Bebas Easy)" class="border p-2 rounded-lg text-sm h-20" required></textarea>
+                    <textarea id="w-main" placeholder="Main Set (Cth: 8x50m Best Average Rest 20s)" class="border p-2 rounded-lg text-sm h-20" required></textarea>
+                    <textarea id="w-cool" placeholder="Cool-down (Cth: 200m Choice)" class="border p-2 rounded-lg text-sm h-20" required></textarea>
+                </div>
+                <button type="submit" class="bg-primary text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition">Simpan Menu Latihan</button>
+            </form>
+        </div>` : ''}
+
+        <div class="space-y-4">
+            ${db.workouts.length === 0 ? `<div class="bg-white p-8 rounded-xl text-center text-slate-400">Belum ada menu latihan yang dicatat.</div>` : 
+            db.workouts.map((w, idx) => `
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 border-l-4 border-l-primary">
+                    <div class="flex justify-between items-center mb-3">
+                        <div>
+                            <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold mr-2">${w.date}</span>
+                            <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded text-xs font-bold">${w.squad}</span>
+                            <h4 class="text-base font-bold text-slate-800 mt-1">${w.title}</h4>
+                        </div>
+                        ${isCoach ? `<button onclick="deleteWorkout(${idx})" class="text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div><b class="text-blue-600">Warm-up:</b><p class="whitespace-pre-line text-slate-600 mt-1">${w.warm}</p></div>
+                        <div><b class="text-teal-600">Main Set:</b><p class="whitespace-pre-line text-slate-600 mt-1">${w.main}</p></div>
+                        <div><b class="text-indigo-600">Cool-down:</b><p class="whitespace-pre-line text-slate-600 mt-1">${w.cool}</p></div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    document.getElementById('content-area').innerHTML = html;
+}
+
+function addWorkout(e) {
+    e.preventDefault();
+    const date = document.getElementById('w-date').value;
+    const squad = document.getElementById('w-squad').value;
+    const title = document.getElementById('w-title').value;
+    const warm = document.getElementById('w-warm').value;
+    const main = document.getElementById('w-main').value;
+    const cool = document.getElementById('w-cool').value;
+
+    db.workouts.unshift({ date, squad, title, warm, main, cool });
+    saveData();
+    renderWorkout();
+}
+
+function deleteWorkout(idx) {
+    if (confirm("Hapus menu latihan ini?")) {
+        db.workouts.splice(idx, 1);
+        saveData();
+        renderWorkout();
+    }
+}
+
+// ==================== 6. SPP & KEUANGAN ====================
 function renderBilling() {
     document.getElementById('page-title').innerText = "Status SPP & Keuangan";
     
@@ -792,7 +1133,118 @@ function exportBillingToCSV() {
     downloadCSV(csv, `SPP_${squadFilter}_${monthStr}.csv`);
 }
 
-// ==================== 6. PENDAFTARAN LOMBA KEJURPROV ====================
+// ==================== 7. KAS & INVENTARIS ====================
+function renderInventory() {
+    document.getElementById('page-title').innerText = "Kas & Inventaris Klub";
+    const isCoach = currentRole === 'coach';
+
+    // Hitung Total Saldo Kas
+    const totalSaldo = db.treasury.reduce((acc, t) => t.type === 'masuk' ? acc + t.amount : acc - t.amount, 0);
+
+    let html = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 border-l-4 border-l-green-500">
+                <h3 class="text-slate-500 text-sm font-semibold">Total Saldo Kas Klub</h3>
+                <p class="text-2xl font-bold text-green-600 mt-1">Rp ${totalSaldo.toLocaleString('id-ID')}</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 border-l-4 border-l-primary">
+                <h3 class="text-slate-500 text-sm font-semibold">Total Barang Inventaris</h3>
+                <p class="text-2xl font-bold text-slate-800 mt-1">${db.inventory.length} Jenis Barang</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- TABEL KAS KLUB -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                <h3 class="text-md font-bold text-slate-800 mb-4">Pencatatan Kas Klub</h3>
+                ${isCoach ? `
+                <form onsubmit="addTreasury(event)" class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+                    <input type="text" id="t-desc" placeholder="Keterangan" class="border p-2 rounded text-xs" required>
+                    <input type="number" id="t-amount" placeholder="Jumlah (Rp)" class="border p-2 rounded text-xs" required>
+                    <select id="t-type" class="border p-2 rounded text-xs">
+                        <option value="masuk">Pemasukan (+)</option>
+                        <option value="keluar">Pengeluaran (-)</option>
+                    </select>
+                    <button type="submit" class="bg-primary text-white text-xs font-bold py-2 rounded col-span-3">Tambah Kas</button>
+                </form>` : ''}
+                
+                <div class="max-h-60 overflow-y-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 border-b">
+                            <tr><th class="p-2">Tgl</th><th class="p-2">Ket</th><th class="p-2">Nominal</th></tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            ${db.treasury.map(t => `
+                                <tr>
+                                    <td class="p-2 text-slate-400">${t.date}</td>
+                                    <td class="p-2 font-medium">${t.desc}</td>
+                                    <td class="p-2 font-bold ${t.type === 'masuk' ? 'text-green-600' : 'text-red-500'}">
+                                        ${t.type === 'masuk' ? '+' : '-'} Rp ${t.amount.toLocaleString('id-ID')}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TABEL INVENTARIS -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                <h3 class="text-md font-bold text-slate-800 mb-4">Inventaris Peralatan</h3>
+                ${isCoach ? `
+                <form onsubmit="addInventory(event)" class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+                    <input type="text" id="i-name" placeholder="Nama Barang" class="border p-2 rounded text-xs" required>
+                    <input type="number" id="i-qty" placeholder="Jumlah" class="border p-2 rounded text-xs" required>
+                    <input type="text" id="i-cond" placeholder="Kondisi (Baik/Rusak)" class="border p-2 rounded text-xs" required>
+                    <button type="submit" class="bg-secondary text-white text-xs font-bold py-2 rounded col-span-3">Tambah Barang</button>
+                </form>` : ''}
+
+                <div class="max-h-60 overflow-y-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 border-b">
+                            <tr><th class="p-2">Barang</th><th class="p-2">Jumlah</th><th class="p-2">Kondisi</th></tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            ${db.inventory.map(i => `
+                                <tr>
+                                    <td class="p-2 font-medium">${i.name}</td>
+                                    <td class="p-2 font-bold">${i.qty} Pcs</td>
+                                    <td class="p-2"><span class="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold">${i.condition}</span></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById('content-area').innerHTML = html;
+}
+
+function addTreasury(e) {
+    e.preventDefault();
+    const desc = document.getElementById('t-desc').value;
+    const amount = parseInt(document.getElementById('t-amount').value);
+    const type = document.getElementById('t-type').value;
+    const date = new Date().toISOString().split('T')[0];
+
+    db.treasury.unshift({ id: Date.now().toString(), date, desc, amount, type });
+    saveData();
+    renderInventory();
+}
+
+function addInventory(e) {
+    e.preventDefault();
+    const name = document.getElementById('i-name').value;
+    const qty = parseInt(document.getElementById('i-qty').value);
+    const condition = document.getElementById('i-cond').value;
+
+    db.inventory.unshift({ id: Date.now().toString(), name, qty, condition });
+    saveData();
+    renderInventory();
+}
+
+// ==================== 8. PENDAFTARAN LOMBA KEJURPROV ====================
 const EVENT_LIST = [
     { category: "GAYA BEBAS", events: [
         { id: "beb_50", name: "50 M" }, { id: "beb_100", name: "100 M" }, { id: "beb_200", name: "200 M" },
@@ -822,7 +1274,6 @@ function renderTournament() {
     const info = db.tournaments.info || {};
 
     let html = `
-        <!-- Form Informasi Official Perkumpulan -->
         <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6">
             <h3 class="text-md font-bold text-slate-800 mb-3"><i class="fa-solid fa-id-card text-primary mr-2"></i>Informasi Perkumpulan & Official</h3>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
@@ -846,7 +1297,6 @@ function renderTournament() {
             ${isCoach ? `<button onclick="saveOfficialInfo()" class="mt-4 bg-primary text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-blue-600 transition">Simpan Info Official</button>` : ''}
         </div>
 
-        <!-- Filter Kelas & Tombol Ekspor -->
         <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
             <div>
                 <h3 class="text-md font-bold text-slate-800">Filter Pendaftaran Lomba</h3>
@@ -854,7 +1304,6 @@ function renderTournament() {
             </div>
             
             <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
-                <!-- Filter Kelas / Squad -->
                 <select id="tour-squad-filter" onchange="filterTournamentTable()" class="border border-slate-200 p-2 rounded-lg font-medium text-slate-700 text-sm outline-none bg-slate-50 focus:bg-white focus:border-primary w-full sm:w-auto">
                     <option value="All">Semua Kelas</option>
                     <option value="Pemula">Kelas Pemula</option>
@@ -874,12 +1323,10 @@ function renderTournament() {
             </div>
         </div>
 
-        <!-- Tabel Atlet Pendaftaran Lomba -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-x-auto" id="tour-table-container">
             ${generateTournamentTable('All')}
         </div>
 
-        <!-- Modal Pilihan Nomor Acara -->
         <div id="event-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4 fade-in">
             <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
                 <div class="flex justify-between items-center mb-4 border-b pb-3">
@@ -931,13 +1378,11 @@ function renderTournament() {
     document.getElementById('content-area').innerHTML = html;
 }
 
-// Handler Filter Kelas Pendaftaran Lomba
 function filterTournamentTable() {
     const squadFilter = document.getElementById('tour-squad-filter').value;
     document.getElementById('tour-table-container').innerHTML = generateTournamentTable(squadFilter);
 }
 
-// Generate Tabel berdasarkan Filter Kelas
 function generateTournamentTable(squadFilter = 'All') {
     let filteredMembers = db.members;
     if (squadFilter !== 'All') {
@@ -993,7 +1438,62 @@ function generateTournamentTable(squadFilter = 'All') {
     `;
 }
 
-// 1. Ekspor FORM-A1 (Sesuai Filter Kelas)
+function saveOfficialInfo() {
+    db.tournaments.info = {
+        club: document.getElementById('info-club').value,
+        city: document.getElementById('info-city').value,
+        official: document.getElementById('info-official').value,
+        hp: document.getElementById('info-hp').value
+    };
+    saveData();
+    alert('Informasi official perkumpulan berhasil disimpan!');
+}
+
+function openRegisterModal(athleteId) {
+    const member = db.members.find(m => m.id === athleteId);
+    if (!member) return;
+
+    const reg = db.tournaments.registrations[athleteId] || { birthPlaceDate: '', nisnas: '', events: [] };
+
+    document.getElementById('modal-athlete-id').value = athleteId;
+    document.getElementById('modal-athlete-name').innerText = `Pendaftaran Acara: ${member.name} (${member.squad})`;
+    document.getElementById('modal-birth').value = reg.birthPlaceDate || (member.birthDate ? `Malang, ${member.birthDate}` : '');
+    document.getElementById('modal-nisnas').value = reg.nisnas || '';
+
+    const checkboxes = document.querySelectorAll('input[name="events"]');
+    checkboxes.forEach(cb => {
+        cb.checked = reg.events ? reg.events.includes(cb.value) : false;
+    });
+
+    document.getElementById('event-modal').classList.remove('hidden');
+}
+
+function closeRegisterModal() {
+    document.getElementById('event-modal').classList.add('hidden');
+}
+
+function saveAthleteEvents(e) {
+    e.preventDefault();
+    const athleteId = document.getElementById('modal-athlete-id').value;
+    const birthPlaceDate = document.getElementById('modal-birth').value;
+    const nisnas = document.getElementById('modal-nisnas').value;
+
+    const selectedEvents = [];
+    document.querySelectorAll('input[name="events"]:checked').forEach(cb => {
+        selectedEvents.push(cb.value);
+    });
+
+    db.tournaments.registrations[athleteId] = {
+        birthPlaceDate,
+        nisnas,
+        events: selectedEvents
+    };
+
+    saveData();
+    closeRegisterModal();
+    renderTournament();
+}
+
 function exportFormA1() {
     const info = db.tournaments.info || {};
     const squadFilter = document.getElementById('tour-squad-filter') ? document.getElementById('tour-squad-filter').value : 'All';
@@ -1019,7 +1519,6 @@ function exportFormA1() {
     downloadCSV(csv, `FORM-A1_KEJURPROV_${squadFilter}_${info.club || 'KLUB'}.csv`);
 }
 
-// 2. Ekspor FORM-A3 (Sesuai Filter Kelas)
 function exportFormA3() {
     const info = db.tournaments.info || {};
     const squadFilter = document.getElementById('tour-squad-filter') ? document.getElementById('tour-squad-filter').value : 'All';
@@ -1067,7 +1566,7 @@ function exportFormA3() {
     downloadCSV(csv, `FORM-A3_KEJURPROV_${squadFilter}_${info.club || 'KLUB'}.csv`);
 }
 
-// Helper Download CSV / Excel
+// Helper Download CSV
 function downloadCSV(csv, filename) {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');

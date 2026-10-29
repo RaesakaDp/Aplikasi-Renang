@@ -53,3 +53,21 @@ body {
     font-weight: 500;
     box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3);
 }
+
+/* Format Khusus Mode Cetak (Print View) */
+@media print {
+    .no-print {
+        display: none !important;
+    }
+    body {
+        background-color: white !important;
+        overflow: visible !important;
+    }
+    main {
+        height: auto !important;
+        overflow: visible !important;
+    }
+    #content-area {
+        padding: 0 !important;
+    }
+}
