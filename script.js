@@ -150,6 +150,7 @@ function processRestore(event) {
 function navigate(page) {
     currentPage = page;
     
+    // Update status tombol navigasi aktif
     document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
     const activeBtn = document.querySelector(`[onclick="navigate('${page}')"]`);
     if (activeBtn) activeBtn.classList.add('active');
@@ -157,8 +158,10 @@ function navigate(page) {
     const contentArea = document.getElementById('content-area');
     contentArea.className = 'p-8 fade-in';
 
+    // Switch case halaman
     switch(page) {
         case 'dashboard': renderDashboard(); break;
+        case 'pdf-analyzer': renderPdfAnalyzerPage(); break; // <-- TAMBAHKAN BARIS INI
         case 'members': renderMembers(); break;
         case 'attendance': renderAttendance(); break;
         case 'performance': renderPerformance(); break;
@@ -1573,4 +1576,263 @@ function downloadCSV(csv, filename) {
     a.href = URL.createObjectURL(blob);
     a.download = filename;
     a.click();
+}
+
+// ==========================================
+// INTEGRASI FITUR BUKU HASIL LOMBA (PDF)
+// ==========================================
+
+// 1. Tambahkan handler halaman baru pada fungsi navigate() Anda
+function renderPdfAnalyzerPage() {
+    const pageTitle = document.getElementById('page-title');
+    if (pageTitle) pageTitle.innerText = "Analisis Buku Hasil Lomba (PDF)";
+
+    const contentArea = document.getElementById('content-area');
+    contentArea.innerHTML = `
+        <div class="space-y-6">
+            <!-- Header Section / Upload Box -->
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div>
+                    <h3 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-file-pdf text-red-500"></i> Impor Buku Hasil Resmi
+                    </h3>
+                    <p class="text-sm text-slate-500 mt-1">
+                        Unggah file Buku Hasil Lomba (.pdf) untuk secara otomatis mengekstrak & menganalisis performa atlet klub.
+                    </p>
+                </div>
+                
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <label class="cursor-pointer bg-primary hover:bg-blue-600 text-white font-semibold px-5 py-2.5 rounded-xl transition shadow-md flex items-center gap-2 text-sm whitespace-nowrap">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Pilih PDF Buku Hasil
+                        <input type="file" id="pdf-file-input" accept=".pdf" class="hidden" onchange="handlePdfUpload(event)">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Options Bar -->
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <label class="text-xs font-bold text-slate-500 uppercase">Klub Sasaran:</label>
+                    <input type="text" id="target-club-input" value="MARABUNTA SC" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-700 outline-none focus:border-primary" placeholder="Nama Klub...">
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="filterTableResults('ALL')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">Semua</button>
+                    <button onclick="filterTableResults('IMPROVED')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100">🟢 Lebih Cepat</button>
+                    <button onclick="filterTableResults('SLOWER')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-600 hover:bg-rose-100">🔴 Lebih Lambat</button>
+                    <button onclick="exportResultsToCSV()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark text-white hover:bg-slate-800 ml-2">
+                        <i class="fa-solid fa-file-excel mr-1"></i> Ekspor CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress Loader (Hidden by Default) -->
+            <div id="pdf-progress-bar" class="hidden bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center">
+                <div class="inline-block animate-spin text-primary text-3xl mb-2">
+                    <i class="fa-solid fa-circle-notch"></i>
+                </div>
+                <p class="text-sm font-semibold text-slate-700" id="pdf-progress-text">Membaca file PDF...</p>
+            </div>
+
+            <!-- Stats Ringkasan -->
+            <div id="pdf-stats-container" class="grid grid-cols-1 md:grid-cols-4 gap-4 hidden">
+                <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase">Total Entri</p>
+                    <p class="text-2xl font-bold text-slate-800 mt-1" id="stat-total-entries">0</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                    <p class="text-xs font-semibold text-emerald-500 uppercase">Personal Best (PB)</p>
+                    <p class="text-2xl font-bold text-emerald-600 mt-1" id="stat-pb-count">0</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                    <p class="text-xs font-semibold text-amber-500 uppercase">Perolehan Medali</p>
+                    <p class="text-sm font-bold text-slate-700 mt-1" id="stat-medals">🥇0 | 🥈0 | 🥉0</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                    <p class="text-xs font-semibold text-primary uppercase">Rata-rata Improvement</p>
+                    <p class="text-2xl font-bold text-primary mt-1" id="stat-avg-diff">0.00s</p>
+                </div>
+            </div>
+
+            <!-- Tabel Hasil Data -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase">
+                                <th class="p-4">Acara / Event</th>
+                                <th class="p-4">Nama Atlet</th>
+                                <th class="p-4">KU / Thn</th>
+                                <th class="p-4">Seed Time</th>
+                                <th class="p-4">Hasil Final</th>
+                                <th class="p-4">Selisih</th>
+                                <th class="p-4 text-center">Rank</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pdf-results-tbody" class="divide-y divide-slate-100 text-sm">
+                            <tr>
+                                <td colspan="7" class="p-8 text-center text-slate-400">
+                                    Belum ada file PDF yang diunggah. Silakan pilih file Buku Hasil Lomba di atas.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Global state simpan hasil ekstraksi PDF
+let extractedPdfData = [];
+// 2. Fungsi Pembaca PDF Client-Side
+async function handlePdfUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const targetClub = (document.getElementById('target-club-input').value || "MARABUNTA SC").trim().toUpperCase();
+    
+    const progressBar = document.getElementById('pdf-progress-bar');
+    const progressText = document.getElementById('pdf-progress-text');
+    const statsContainer = document.getElementById('pdf-stats-container');
+    
+    progressBar.classList.remove('hidden');
+    statsContainer.classList.add('hidden');
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
+        extractedPdfData = [];
+        let currentAcara = "Acara Umum";
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+            progressText.innerText = `Mengekstrak Halaman ${i} dari ${pdf.numPages}...`;
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            
+            // Satukan item teks per baris berdasarkan koordinat Y
+            let linesMap = {};
+            textContent.items.forEach(item => {
+                let y = Math.round(item.transform[5]);
+                if (!linesMap[y]) linesMap[y] = [];
+                linesMap[y].push(item.str);
+            });
+
+            // Urutkan baris dari atas ke bawah
+            let sortedY = Object.keys(linesMap).sort((a, b) => b - a);
+
+            sortedY.forEach(y => {
+                let lineStr = linesMap[y].join(" ").replace(/\s+/g, " ").trim();
+
+                if (lineStr.startsWith("ACARA ")) {
+                    currentAcara = lineStr;
+                }
+
+                if (lineStr.toUpperCase().includes(targetClub)) {
+                    // Parser regex sederhana baris atlet
+                    let parsed = parseResultLine(lineStr, currentAcara);
+                    if (parsed) extractedPdfData.push(parsed);
+                }
+            });
+        }
+
+        progressBar.classList.add('hidden');
+        renderPdfResultsTable(extractedPdfData);
+
+    } catch (err) {
+        alert("Gagal membaca file PDF: " + err.message);
+        progressBar.classList.add('hidden');
+    }
+}
+
+// 3. Helper Regex Parser Baris Hasil Lomba
+function parseResultLine(lineStr, currentAcara) {
+    // Cari waktu & rank dalam baris
+    const times = lineStr.match(/(\d{2}\.\d{2}\.\d{2}|\d{2}\:\d{2}\.\d{2}|NT|DQ|DNS)/g);
+    const rankMatch = lineStr.match(/^(\d+)/);
+
+    let seedTime = "NT";
+    let finalTime = "NT";
+
+    if (times && times.length >= 2) {
+        seedTime = times[times.length - 2];
+        finalTime = times[times.length - 1];
+    } else if (times && times.length === 1) {
+        finalTime = times[0];
+    }
+
+    // Kalkulasi Improvement
+    let seedSec = parseTimeToSeconds(seedTime);
+    let finalSec = parseTimeToSeconds(finalTime);
+    let diffSec = null;
+    let diffStr = "-";
+    let status = "NORMAL";
+
+    if (seedSec !== null && finalSec !== null) {
+        diffSec = finalSec - seedSec;
+        diffStr = (diffSec < 0 ? "" : "+") + diffSec.toFixed(2) + "s";
+        status = diffSec < 0 ? "IMPROVED" : "SLOWER";
+    }
+
+    return {
+        acara: currentAcara,
+        raw: lineStr,
+        rank: rankMatch ? rankMatch[1] : "-",
+        seedTime: seedTime,
+        finalTime: finalTime,
+        diffSec: diffSec,
+        diffStr: diffStr,
+        status: status
+    };
+}
+
+function parseTimeToSeconds(tStr) {
+    if (!tStr || tStr === "NT" || tStr === "DQ" || tStr === "DNS") return null;
+    let parts = tStr.split(/[\.\:]/);
+    if (parts.length === 3) {
+        return parseInt(parts[0]) * 60 + parseInt(parts[1]) + parseInt(parts[2]) / 100;
+    } else if (parts.length === 2) {
+        return parseInt(parts[0]) + parseInt(parts[1]) / 100;
+    }
+    return null;
+}
+
+// 4. Render Tabel & Statistik Hasil
+function renderPdfResultsTable(data) {
+    const tbody = document.getElementById('pdf-results-tbody');
+    const statsContainer = document.getElementById('pdf-stats-container');
+    
+    if (!data || data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">Tidak ada atlet dari klub yang ditemukan dalam dokumen PDF ini.</td></tr>`;
+        return;
+    }
+
+    statsContainer.classList.remove('hidden');
+    
+    // Hitung statistik ringkas
+    let total = data.length;
+    let improved = data.filter(d => d.status === "IMPROVED").length;
+    let rank1 = data.filter(d => d.rank === "1").length;
+    let rank2 = data.filter(d => d.rank === "2").length;
+    let rank3 = data.filter(d => d.rank === "3").length;
+
+    document.getElementById('stat-total-entries').innerText = total;
+    document.getElementById('stat-pb-count').innerText = `${improved} / ${total}`;
+    document.getElementById('stat-medals').innerText = `🥇 ${rank1} | 🥈 ${rank2} | 🥉 ${rank3}`;
+
+    tbody.innerHTML = data.map(item => `
+        <tr class="hover:bg-slate-50 transition-colors">
+            <td class="p-4 font-medium text-slate-800">${item.acara}</td>
+            <td class="p-4 text-slate-700 font-semibold">${item.raw}</td>
+            <td class="p-4 text-slate-500 text-xs">-</td>
+            <td class="p-4 font-mono text-xs text-slate-600">${item.seedTime}</td>
+            <td class="p-4 font-mono text-xs font-bold text-slate-800">${item.finalTime}</td>
+            <td class="p-4 font-mono text-xs font-bold ${item.status === 'IMPROVED' ? 'text-emerald-600' : (item.status === 'SLOWER' ? 'text-rose-500' : 'text-slate-400')}">
+                ${item.diffStr}
+            </td>
+            <td class="p-4 text-center font-bold">
+                ${item.rank === '1' ? '🥇 1' : (item.rank === '2' ? '🥈 2' : (item.rank === '3' ? '🥉 3' : item.rank))}
+            </td>
+        </tr>
+    `).join('');
 }
