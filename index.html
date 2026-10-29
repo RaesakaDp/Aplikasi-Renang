@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AquaTrack - Manajemen Klub Renang</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Poppins -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: '#0ea5e9', secondary: '#14b8a6', dark: '#0f172a' },
+                    fontFamily: { sans: ['Poppins', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 flex h-screen overflow-hidden role-parent">
+
+    <!-- Sidebar Navigasi -->
+    <aside class="w-64 bg-dark text-white flex flex-col transition-all duration-300">
+        <div class="p-6 flex items-center gap-3 border-b border-slate-700">
+            <i class="fa-solid fa-water text-3xl text-primary"></i>
+            <h1 class="text-2xl font-bold tracking-wide">Aqua<span class="text-primary">Track</span></h1>
+        </div>
+        
+        <nav class="flex-1 p-4 space-y-2 overflow-y-auto" id="nav-menu">
+            <button onclick="navigate('dashboard')" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors active">
+                <i class="fa-solid fa-chart-pie w-5"></i> Dashboard
+            </button>
+            <button onclick="navigate('members')" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors">
+                <i class="fa-solid fa-users w-5"></i> Anggota & Squad
+            </button>
+            <button onclick="navigate('attendance')" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors">
+                <i class="fa-solid fa-calendar-check w-5"></i> Absensi Latihan
+            </button>
+            <button onclick="navigate('performance')" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors">
+                <i class="fa-solid fa-stopwatch w-5"></i> Rekor Waktu (PB)
+            </button>
+            <button onclick="navigate('billing')" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors">
+                <i class="fa-solid fa-file-invoice-dollar w-5"></i> SPP & Keuangan
+            </button>
+            <button onclick="navigate('tournament')" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors">
+                <i class="fa-solid fa-trophy w-5"></i> Pendaftaran Lomba
+            </button>
+        </nav>
+        
+        <!-- Section Auth di Bottom Sidebar -->
+        <div class="p-4 border-t border-slate-700" id="auth-section">
+            <!-- Di-render oleh JavaScript -->
+        </div>
+    </aside>
+
+    <!-- Content Utama -->
+    <main class="flex-1 flex flex-col h-screen overflow-y-auto relative">
+        <!-- Header Aplikasi -->
+        <header class="bg-white/80 backdrop-blur-md sticky top-0 z-10 px-8 py-5 flex justify-between items-center shadow-sm">
+            <h2 id="page-title" class="text-2xl font-bold text-slate-800">Dashboard Utama</h2>
+            <div class="flex items-center gap-4">
+                <div class="bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2">
+                    <span id="current-role-display"><i class="fa-solid fa-user text-slate-500 mr-1"></i> Wali Atlet</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Container Halaman Dinamis -->
+        <div class="p-8" id="content-area">
+            <!-- Di-render oleh JavaScript -->
+        </div>
+    </main>
+
+    <!-- Modal Login -->
+    <div id="login-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-50 flex items-center justify-center fade-in">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-96">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-slate-800"><i class="fa-solid fa-lock text-primary mr-2"></i>Login Pelatih</h3>
+                <button onclick="hideLoginModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <form onsubmit="handleLogin(event)">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Password Pelatih</label>
+                    <input type="password" id="login-password" class="w-full border-2 border-slate-200 rounded-lg p-2 focus:border-primary focus:ring-0 outline-none" placeholder="Masukkan password...">
+                    <p class="text-xs text-slate-500 mt-1">Hint: <span class="font-mono bg-slate-100 px-1 rounded">admin123</span></p>
+                </div>
+                <button type="submit" class="w-full bg-primary hover:bg-blue-600 text-white font-bold py-2 rounded-lg transition-colors shadow-md">Masuk</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Script JS -->
+    <script src="script.js"></script>
+</body>
+</html>
